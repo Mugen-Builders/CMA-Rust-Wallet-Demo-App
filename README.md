@@ -1,7 +1,7 @@
 # cma-rust-wallet
 
 A Cartesi Rollups demo application showing how to build an asset wallet on top
-of the [`libcma_binding_rust`](../cma-parsers) library.
+of the [`libcma_binding_rust`](https://github.com/Mugen-Builders/libcma_binding_rust) library.
 
 The point of the demo is a clean split of responsibilities:
 
