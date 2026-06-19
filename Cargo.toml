@@ -1,0 +1,13 @@
+[package]
+name = "cma-rust-wallet"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+json = "0.12"
+hyper = { version = "0.14", features = ["http1", "runtime", "client"] }
+tokio = { version = "1.32", features = ["macros", "rt-multi-thread"] }
+ethers-core = "1.0.2"
+hex = "0.4"
+libcma_binding_rust = { git = "https://github.com/Mugen-Builders/libcma_binding_rust.git", branch = "main", default-features = false, features = ["native"] }
+libcmt-binding-rust = { git = "https://github.com/Mugen-Builders/libcmt-binding-rust.git", branch = "main" }
