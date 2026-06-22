@@ -172,7 +172,7 @@ struct WalletApp {
 impl WalletApp {
     fn new() -> Result<Self, String> {
         Ok(Self {
-            ledger: Ledger::new().map_err(|e| format!("ledger init failed: {:?}", e))?,
+            ledger: Self::open_ledger()?,
             portals: PortalAddresses::from_env(),
             users: HashMap::new(),
             history: Vec::new(),
@@ -180,6 +180,36 @@ impl WalletApp {
             app_address: Address::zero(),
             block_number: 0,
         })
+    }
+
+    /// Open the libcma ledger.
+    ///
+    /// On the Cartesi machine (riscv64) the ledger is backed by the raw `accounts` flash
+    /// drive at `/dev/pmem1`, so every balance persists in the machine state and is provable
+    /// on-chain for emergency withdrawal. On the host (the libcma `native` mock) it is
+    /// purely in-memory, which is all the host type-check / tests need.
+    fn open_ledger() -> Result<Ledger, String> {
+        #[allow(unused_mut)]
+        let mut ledger = Ledger::new().map_err(|e| format!("ledger init failed: {:?}", e))?;
+        #[cfg(target_arch = "riscv64")]
+        {
+            use libcma_binding_rust::ledger::{LedgerFileConfig, LedgerMemoryMode};
+            // The `accounts` drive is a raw 4 MiB flash drive (see cartesi.toml).
+            ledger
+                .init_from_file(
+                    "/dev/pmem1",
+                    LedgerFileConfig {
+                        mode: LedgerMemoryMode::CreateOnly,
+                        offset: 0,
+                        memory_length: 4 * 1024 * 1024,
+                        max_accounts: 4096,
+                        max_assets: 256,
+                        max_balances: 4096,
+                    },
+                )
+                .map_err(|e| format!("accounts-drive ledger init failed: {:?}", e))?;
+        }
+        Ok(ledger)
     }
 
     /// Refresh per-input context (called once at the top of every advance).
@@ -807,6 +837,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut accept_previous_request = true;
 
     loop {
+        // libcma keeps the ledger in an mmap'd region of the accounts drive (/dev/pmem1).
+        // On the non-DAX Cartesi pmem device those writes only dirty the page cache, so we
+        // flush them to the drive before yielding — otherwise the machine snapshot (and the
+        // accounts-drive Merkle root used for emergency withdrawal) would not see them.
+        unsafe { libc::sync() };
+
         println!("Sending finish");
         let mut finish = cmt_rollup_finish_t {
             accept_previous_request,

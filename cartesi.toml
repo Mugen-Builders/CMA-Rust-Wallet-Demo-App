@@ -1,0 +1,60 @@
+# Cartesi Machine configuration for the CMA Rust Wallet demo.
+#
+# Two drives:
+#   - root     : the application + OS, built from the Dockerfile (pmem0)
+#   - accounts : a raw, unformatted fixed-size flash drive that libcma opens as the
+#                balance ledger via `Ledger::init_from_file("/dev/pmem1", ...)` (pmem1).
+#
+# Read by `cartesi build` / `cartesi run`. See:
+# docs/cartesi-rollups_versioned_docs/version-2.0/development/advanced-configuration.md
+
+# SDK provides cartesi-machine 0.20.0 (matches the host install used across this
+# workspace and required by the emergency-withdrawal tooling). cartesi-machine 0.20.0
+# uses the flash-drive option `data_filename` (renamed from `filename`); the published
+# CLI 2.0.0-alpha.34 still emits the old `filename`, so it is patched to emit
+# `data_filename` (upstream commit 1c9388f) — run via /tmp/cartesi-patched.js.
+# Note: cartesi/sdk:0.12.0-alpha.34 is NOT published; alpha.41 is the matching tag.
+sdk = "cartesi/sdk:0.12.0-alpha.41"
+
+[machine]
+ram_length = "128Mi"
+# entrypoint + workdir + env come from the Dockerfile (ENTRYPOINT ["cma-rust-wallet"]).
+use_docker_env = true
+use_docker_workdir = true
+# Compute the machine hash after build (needed for on-chain deployment / verification).
+final_hash = true
+
+# --- Root drive: OS + the wallet binary (built from the Dockerfile) -> /dev/pmem0 ---
+[drives.root]
+builder = "docker"
+dockerfile = "Dockerfile"
+format = "ext2"
+
+# --- Accounts drive: raw 4 MiB flash drive for the libcma balance ledger -> /dev/pmem1 ---
+# `builder = "empty"` + `format = "raw"` produces a zero-filled, UNFORMATTED drive (the CLI
+# equivalent of cartesi-machine's `mke2fs:false`). The app opens the block device directly
+# (no filesystem), so `mount = false`. 4 MiB = 2^17 * 32-byte records, matching the
+# emergency-withdrawal accounts-drive convention (log2_max_num_of_accounts = 17).
+[drives.accounts]
+builder = "empty"
+format = "raw"
+# Size in BYTES. 4194304 = 4 MiB = 2^17 accounts * 32-byte records, and a multiple of
+# the 4096-byte flash-drive page size. (The CLI's size parser doesn't understand a "4Mi"
+# suffix — it would read just `4` and produce a 4-byte drive.)
+size = 4194304
+mount = false
+user = "dapp"
+
+# --- Emergency-withdrawal config (for the NEXT step) -------------------------------------
+# Forwarded by `cartesi run` to `cartesi-rollups-cli deploy application --withdrawal-config`.
+# `accounts_drive_start_index` is NOT derived by the CLI — it must equal the machine memory
+# start the accounts drive lands on, read from `.cartesi/image/config.json` AFTER `cartesi build`:
+#   jq -r '.config.flash_drive[] | select(.length==4194304) | (.start/4194304|floor)' .cartesi/image/config.json
+# Uncomment and fill in once built (guardian/builder shown for the local devnet):
+#
+# [withdrawal.config]
+# guardian = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+# log2_leaves_per_account = 0
+# log2_max_num_of_accounts = 17
+# accounts_drive_start_index = 0   # <-- derive from config.json after build
+# withdrawal_output_builder = "0x0745787835A019cd4dae8EDB541Fbc0647793d63"
