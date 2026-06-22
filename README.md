@@ -1,3 +1,14 @@
+<br>
+<p align="center">
+    <img src="https://github.com/user-attachments/assets/080bb0be-060c-4813-85b4-6d9bf25af01f" align="center" width="20%">
+</p>
+<br>
+<div align="center">
+	<i>Cartesi Rollups LIBCMA Rust Wallet Demo</i>
+</div>
+<br>
+
+
 # cma-rust-wallet
 
 A Cartesi Rollups demo application showing how to build an asset wallet on top
@@ -25,7 +36,17 @@ Two flows that share a single [Setup](#setup-run-once):
 | **[Test 1 — libcma ledger](#test-1--libcma-ledger-non-destructive)** | Deposit tokens and read balances back from the drive-backed libcma ledger. **Non-destructive** — stop here or continue. |
 | **[Test 2 — emergency withdrawal](#test-2--emergency-withdrawal-terminal)** | Recover funds straight from the contracts by proving the accounts drive — no live node. **Terminal** (it forecloses the app); run after Test 1 on the same instance. |
 
-**Contents:** [Supported assets](#supported-assets) · [Behaviour](#behaviour) · [Layout](#layout) · [Inspect endpoints](#inspect-endpoints) · [Accounts drive & `cartesi.toml`](#accounts-drive--cartesitoml) · [libcma drive-backed ledger](#libcma-drive-backed-ledger) · [Setup](#setup-run-once) · [Test 1 — libcma ledger](#test-1--libcma-ledger-non-destructive) · [Test 2 — emergency withdrawal](#test-2--emergency-withdrawal-terminal)
+## **Contents:** 
+- [Supported assets](#supported-assets) 
+- [Behaviour](#behaviour) 
+- [Layout](#layout) 
+- [Inspect endpoints](#inspect-endpoints) 
+- [Accounts drive & `cartesi.toml`](#accounts-drive--cartesitoml) 
+- [libcma drive-backed ledger](#libcma-drive-backed-ledger) 
+- [Setup](#setup-run-once) 
+- [Test 1 — libcma ledger](#test-1--libcma-ledger-non-destructive) 
+- [Test 2 — emergency withdrawal](#test-2--emergency-withdrawal-terminal)
+- [Teardown](#teardown)
 
 ## Supported assets
 
@@ -283,12 +304,12 @@ How it works:
   # -> {"log2_target_size":7,"log2_root_size":64,"target_address":...,"target_hash":...,"sibling_hashes":[...],"root_hash":...}
   ```
 
-**Prereqs:** the **`account-driver-reader`** host binary built from
+### **Prereqs:** the **`account-driver-reader`** host binary built from
 [`machine-asset-tools`](https://github.com/Mugen-Builders/machine-asset-tools) against
 cartesi-machine 0.20 (the 0.20 port is described in [INTEGRATION_NOTES.md](INTEGRATION_NOTES.md)),
 plus the proof-transform script [`transform_proof.py`](devnet/transform_proof.py) (ships in `devnet/`).
 
-### Run it
+### Interaction Steps
 
 First set the shared variables (run from `devnet/`). Point `READER` at your local
 `account-driver-reader` build.
@@ -351,3 +372,33 @@ echo "user (acct0): $(cast call $TOKEN 'balanceOf(address)(uint256)' $ACC0     -
 
 When step 6 prints **app contract 0 / user 1000000**, the deposited tokens were recovered straight
 from the contracts using only the accounts-drive Merkle proof — no operator, no live node.
+
+## Teardown
+
+Stop everything that the [Setup](#setup-run-once) started, from `devnet/`.
+
+**1. Stop the node and remove its data.** `down -v` also drops the Postgres volume, so the app
+registration and processed inputs are cleared for a clean next run.
+
+```sh
+cd devnet
+docker compose -f compose.local.yaml down -v
+```
+
+**2. Stop the anvil devnet.**
+
+```sh
+./run_devnet.sh down
+```
+
+**3. (Optional) Remove the per-run files** left in `devnet/` — the staged machine image, the
+node's bind-mounted data/snapshots, the deployed-builder/app-address notes, and the generated
+proofs.
+
+```sh
+rm -rf .cartesi/image node-data node-snapshots artifacts .app_addr
+```
+
+The build artifacts at the project root (`.cartesi/image`) and the anvil-state cache
+(`devnet/anvil-state/`) are kept — they let you skip the rebuild/redownload next time. Delete them
+too if you want a completely fresh start.
