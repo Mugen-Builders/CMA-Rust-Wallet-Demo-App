@@ -1,0 +1,9 @@
+# runtime state
+node-data/
+node-snapshots/
+artifacts/
+anvil-state/
+anvil.log
+.anvil.pid
+.cartesi/
+.app_addr

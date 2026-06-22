@@ -1,0 +1,164 @@
+name: emergency-withdrawal-test
+
+# The node containers dial an anvil running ON THE HOST (started by ./run_devnet.sh),
+# reached via the Docker host-gateway. run_devnet.sh loads the Cartesi v3 contracts from the
+# rollups-contracts release anvil-state tarball — no devnet image to build.
+x-extra-hosts: &extra-hosts
+  - "host.docker.internal:host-gateway"
+
+x-env: &env
+  CARTESI_LOG_LEVEL: info
+  CARTESI_AUTH_KIND: ${AUTH_KIND}
+  CARTESI_BLOCKCHAIN_ID: ${BLOCKCHAIN_ID}
+  CARTESI_AUTH_PRIVATE_KEY: ${CARTESI_AUTH_PRIVATE_KEY}
+  CARTESI_BLOCKCHAIN_WS_ENDPOINT: ${BLOCKCHAIN_WS_ENDPOINT}
+  CARTESI_BLOCKCHAIN_HTTP_ENDPOINT: ${BLOCKCHAIN_HTTP_ENDPOINT}
+  CARTESI_SNAPSHOTS_DIR: "/var/lib/cartesi-rollups-node/snapshot"
+  # Cartesi v2 protocol contracts — canonical alpha.12 / v3 set, matching the
+  # rollups-contracts release anvil state that ./run_devnet.sh loads into anvil.
+  CARTESI_CONTRACTS_INPUT_BOX_ADDRESS: 0x346B3df038FE9f8380071eC6514D5a83aD143939
+  CARTESI_CONTRACTS_AUTHORITY_FACTORY_ADDRESS: 0x3C1FE01c542a88A523FF6847eD1E26176c8C4ED0
+  CARTESI_CONTRACTS_QUORUM_FACTORY_ADDRESS: 0x1f94009389F408B8D0ADfFcF8BBDCe5552BaCa5F
+  CARTESI_CONTRACTS_APPLICATION_FACTORY_ADDRESS: 0xC549F89cF1ca43eDDECC64Ac2208F4b283B1c483
+  CARTESI_CONTRACTS_SELF_HOSTED_APPLICATION_FACTORY_ADDRESS: 0x6145C5996a71a379E030aEb0440df79D60833418
+  CARTESI_CONTRACTS_DAVE_APP_FACTORY_ADDRESS: 0x33FFf0b681c90664dD048a60400AE2D827a4c5bb
+  CARTESI_DEVNET_WITHDRAWAL_OUTPUT_BUILDER_ADDRESS: ${WITHDRAWAL_OUTPUT_BUILDER_ADDRESS}
+  CARTESI_DATABASE_CONNECTION: postgres://postgres:password@database:5432/rollupsdb?sslmode=disable
+  CARTESI_EPOCH_LENGTH: 1
+  CARTESI_BLOCKCHAIN_DEFAULT_BLOCK: "latest"
+
+services:
+  database:
+    container_name: database
+    image: cartesi/rollups-database:0.12.0-alpha.41
+    environment:
+      POSTGRES_PASSWORD: password
+    extra_hosts: *extra-hosts
+    networks:
+      - default
+    ports:
+      - "5432:5432"   # exposed so host-side cartesi-rollups-cli can register the app
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U postgres || exit 1
+      timeout: 1s
+      interval: 10s
+      retries: 5
+      start_period: 10s
+      start_interval: 200ms
+
+  evm-reader:
+    container_name: evm-reader
+    image: cartesi/rollups-runtime:0.12.0-alpha.41
+    command: cartesi-rollups-evm-reader --default-block latest
+    depends_on:
+      database:
+        condition: service_healthy
+    extra_hosts: *extra-hosts
+    networks:
+      - default
+    ports:
+      - "10001:10001"
+    environment:
+      <<: *env
+
+  advancer:
+    container_name: advancer
+    image: cartesi/rollups-runtime:0.12.0-alpha.41
+    command: cartesi-rollups-advancer
+    # This runtime image has no WorkingDir (defaults to /), but the app's registered
+    # template_uri is the relative path ".cartesi/image". Set the workdir so it (and the
+    # cartesi-machine subprocess it spawns) resolves against /var/lib/cartesi-rollups-node.
+    working_dir: /var/lib/cartesi-rollups-node
+    depends_on:
+      database:
+        condition: service_healthy
+    volumes:
+      # Bind-mounted host dirs (chmod 777) so the advancer's "cartesi" user (uid 102)
+      # can write node data and per-epoch snapshots. Root-owned named volumes fail with
+      # "machine is closed" when the EVERY_EPOCH snapshot write is denied.
+      - ./node-data:/var/lib/cartesi-rollups-node/data
+      - ./node-snapshots:/var/lib/cartesi-rollups-node/snapshot
+      # The app template, mounted at the path the advancer resolves the registered
+      # relative template_uri ".cartesi/image" against (its working directory).
+      - .cartesi/image:/var/lib/cartesi-rollups-node/.cartesi/image:ro
+    extra_hosts: *extra-hosts
+    networks:
+      - default
+    ports:
+      - "10002:10002"
+      - "10012:10012"
+    environment:
+      <<: *env
+
+  validator:
+    container_name: validator
+    image: cartesi/rollups-runtime:0.12.0-alpha.41
+    command: cartesi-rollups-validator
+    depends_on:
+      database:
+        condition: service_healthy
+    extra_hosts: *extra-hosts
+    networks:
+      - default
+    ports:
+      - "10003:10003"
+    environment:
+      <<: *env
+
+  claimer:
+    container_name: claimer
+    image: cartesi/rollups-runtime:0.12.0-alpha.41
+    command: cartesi-rollups-claimer
+    depends_on:
+      database:
+        condition: service_healthy
+    extra_hosts: *extra-hosts
+    networks:
+      - default
+    ports:
+      - "10004:10004"
+    environment:
+      <<: *env
+
+  jsonrpc-api:
+    container_name: jsonrpc-api
+    image: cartesi/rollups-runtime:0.12.0-alpha.41
+    command: cartesi-rollups-jsonrpc-api
+    depends_on:
+      database:
+        condition: service_healthy
+    extra_hosts: *extra-hosts
+    networks:
+      - default
+    ports:
+      - "10005:10005"
+      - "10011:10011"
+    environment:
+      <<: *env
+
+  # One-shot proof helper (tools profile → not started by `docker compose up`).
+  #   docker compose -f compose.local.yaml run --rm machine-tool replay ...
+  #   docker compose -f compose.local.yaml run --rm machine-tool prove accounts-drive ...
+  machine-tool:
+    image: cartesi/rollups-runtime:0.12.0-alpha.41
+    profiles:
+      - tools
+    entrypoint:
+      - cartesi-rollups-machine-tool
+    # Run from a writable dir: replay spawns cartesi-machine, which writes transient
+    # input/report .bin files into the current directory (uid 102 cannot write to /).
+    working_dir: /artifacts
+    depends_on:
+      database:
+        condition: service_healthy
+    volumes:
+      - .cartesi/image:/var/lib/cartesi-rollups-node/snapshot:ro
+      - ./artifacts:/artifacts
+    extra_hosts: *extra-hosts
+    networks:
+      - default
+    environment:
+      <<: *env
+

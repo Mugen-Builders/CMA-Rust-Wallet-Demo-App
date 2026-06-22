@@ -1,0 +1,7 @@
+{
+  "guardian": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "log2_leaves_per_account": 2,
+  "log2_max_num_of_accounts": 12,
+  "accounts_drive_start_index": 77309411328,
+  "withdrawal_output_builder": "0x959922bE3CAee4b8Cd9a407cc3ac1C251C2007B1"
+}
