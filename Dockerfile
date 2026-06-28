@@ -145,12 +145,12 @@ COPY --from=cross-build-stage /opt/cartesi/dapp/target/riscv64gc-unknown-linux-g
 
 ENV ROLLUP_HTTP_SERVER_URL="http://127.0.0.1:5004"
 
-# Cartesi v2 portal addresses for the local devnet (cartesi/rollups-node-devnet).
-# The wallet resolves a deposit's caller against these to pick the libcma deposit layout.
-ENV ETHER_PORTAL_ADDRESS="0x8b53327575ac999bdfa8003f4b5134DFF9027516"
+# Single-asset config for the local devnet. The wallet only needs the ERC-20 portal (it
+# resolves a deposit's caller against it to pick the libcma deposit layout) and the single
+# ERC-20 it denominates everything in. WALLET_TOKEN_ADDRESS is fixed into the accounts drive
+# on first boot and MUST match the token the on-chain UsdWithdrawalOutputBuilder was deployed
+# for (devnet/run_devnet.sh deploys it for this token). Override both per network at deploy time.
 ENV ERC20_PORTAL_ADDRESS="0x22E57511C30CcE6CDaa742E13CE3b774fDC663b1"
-ENV ERC721_PORTAL_ADDRESS="0xcA3a0a47915C12F020CF70B938aCC8e744414cb8"
-ENV ERC1155_SINGLE_PORTAL_ADDRESS="0x13663E193673756a02e84b724B8a3422A9a7aab4"
-ENV ERC1155_BATCH_PORTAL_ADDRESS="0x3649c5E2De91C69a7Bb80D864f0039da5E511096"
+ENV WALLET_TOKEN_ADDRESS="0x88A2120B7068E78692C8fd12E751d610B6377E4d"
 
 ENTRYPOINT ["cma-rust-wallet"]

@@ -6,6 +6,15 @@ to change, *why*, and how to make it painless for the next person who runs this.
 
 If you're new to Cartesi, read the 60-second primer first.
 
+> **Update — single-asset migration.** This wallet now uses libcma's **single-asset** ledger
+> (`Ledger::init_single_from_file`, pinned via `Cargo.toml` to `branch = "feat/single-asset"`).
+> Each account is the **standard 32-byte accounts-drive record** (`balance | owner | padding`)
+> instead of the old 128-byte multi-asset record. That one change retires three of the custom
+> pieces below: the on-chain `GenericWithdrawalOutputBuilder` (item 6), the
+> `account-driver-reader` proof tool (item 5), and the `transform_proof.py` script (item 8) — all
+> replaced by the **default** stock `UsdWithdrawalOutputBuilder` + `cartesi-rollups-machine-tool`.
+> Those items are kept below for the history, flagged **✅ NO LONGER NEEDED**.
+
 ---
 
 ## 60-second primer (for beginners)
@@ -27,6 +36,11 @@ If you're new to Cartesi, read the 60-second primer first.
 ---
 
 ## Part 1 — Why we vendored a copy of `libcma_binding_rust`
+
+> **Now superseded:** the wallet no longer vendors libcma. `Cargo.toml` uses a plain **git
+> dependency** on `branch = "feat/single-asset"`, and libcma's `build.rs` cross-compiles the real
+> `libcma.a` from source during the Docker build (Part 2, item 1) — i.e. the "Option A: self-building
+> `riscv64` feature" recommended below was adopted. The history is kept for context.
 
 ### What "vendoring" means
 "Vendoring" = copying a dependency's source **into your own repository** instead of pulling it
@@ -121,13 +135,11 @@ Here is everything we had to touch to get from "doesn't build" to "tokens recove
   `data_filename:…` (upstream commit `1c9388f`). The published CLI predates the rename, so every
   build died with *"unknown option filename"*. (Pinning the SDK can't help — the CLI runs the
   host `cartesi-machine` first.)
-- **What we did:** Made a copy of the CLI's bundled JavaScript and changed that one word
-  (`filename` → `data_filename`); we run the patched copy as `~/.local/bin/cartesi-patched`.
-- **Best going forward:** Use a CLI newer than alpha.34 once it's published (`npm i -g @cartesi/cli@latest`)
-  — the fix is already in the CLI's source repo, just unreleased. Until then, the one-word patch is
-  the workaround. An external user should **not** be expected to patch a bundle by hand; the
-  cleanest interim fix is to **build the CLI from its source repo** (which has the rename) and ship
-  that, or wait for the release.
+- **What we did (historical):** Made a copy of the CLI's bundled JavaScript and changed that one
+  word (`filename` → `data_filename`); we ran the patched copy as `~/.local/bin/cartesi-patched`.
+- **✅ RESOLVED:** the fix shipped in **`@cartesi/cli` 2.0.0-alpha.35**, which emits `data_filename`
+  natively. The patch is no longer needed — install alpha.35+ (`npm i -g @cartesi/cli@latest`,
+  verify `cartesi --version`) and use plain `cartesi build`.
 
 ### 4. Docker Desktop DNS
 - **Source:** Docker Desktop on Linux (the machine's container engine).
@@ -138,48 +150,49 @@ Here is everything we had to touch to get from "doesn't build" to "tokens recove
 - **Best going forward:** Document this as a prerequisite (already in the README). It's an
   environment quirk, not a project bug.
 
-### 5. `account-driver-reader` — the proof generator
+### 5. `account-driver-reader` — the proof generator — ✅ NO LONGER NEEDED
 - **Source:** `machine-asset-tools/tools/account-driver-reader.cpp` (libcma's own tool).
-- **What was failing:** It was written for cartesi-machine **0.19**. On **0.20** the C API
-  changed: `cm_load_new` gained a "sharing mode" argument and `cm_get_proof` changed shape
-  (it now also takes a root-size and returns the proof as JSON text). It wouldn't even compile.
-- **What we did:** Ported it — added `CM_SHARING_NONE` to `cm_load_new` and
-  `CM_HASH_TREE_LOG2_ROOT_SIZE` to `cm_get_proof` at the three call sites. It now builds against
-  0.20 and links the installed `libcartesi`.
-- **Best going forward:** Upstream this port to machine-asset-tools so it tracks 0.20+. The
-  release note even says proof generation will eventually move behind a proper JSON-RPC API in
-  the node — at which point this standalone tool may not be needed at all.
+- **What it was for (historical):** It was written for cartesi-machine **0.19**; on **0.20** the C
+  API changed (`cm_load_new` gained a "sharing mode" argument, `cm_get_proof` gained a root-size and
+  returns JSON), so we ported it (`CM_SHARING_NONE` + `CM_HASH_TREE_LOG2_ROOT_SIZE` at the three
+  call sites) to generate the full Merkle proof for a 128-byte multi-asset record.
+- **✅ Now obsolete:** single-asset records are the standard 32-byte accounts-drive leaf, so proof
+  generation is done by the **default** `cartesi-rollups-machine-tool` (`replay` + `prove
+  accounts-drive`, in `devnet/compose.local.yaml`). No custom tool, no 0.20 port to maintain.
 
-### 6. The on-chain withdrawal output builder
-- **Source:** the protocol contracts only shipped `UsdWithdrawalOutputBuilder` (a simple
-  single-asset format that does **not** match libcma's multi-asset account record).
-- **What was failing:** There was no on-chain contract that could read libcma's 128-byte account
-  record and turn it into a token transfer.
-- **What we did:** Found and deployed
-  [`GenericWithdrawalOutputBuilder`](devnet/contracts/GenericWithdrawalOutputBuilder.sol)
-  (from `lynoferraz/aux-cr-contracts`) — its decoder is a **byte-exact match** for libcma's
-  record (type + owner + token + tokenId + amount), and it emits ETH/ERC-20/721/1155 transfers.
-- **Best going forward:** Get this builder into the official contracts/devnet so it's deployed
-  by default (right now we deploy it by hand after each devnet reset).
+### 6. The on-chain withdrawal output builder — ✅ NO LONGER NEEDED
+- **Source:** the protocol contracts ship `UsdWithdrawalOutputBuilder` — a simple **single-asset**
+  format: it decodes a 32-byte `balance | owner | padding` record and emits an ERC-20 transfer of a
+  per-builder token to `owner`.
+- **What was failing (historical):** the old multi-asset ledger wrote a **128-byte** record
+  (type + owner + token + tokenId + amount) that the stock builder couldn't read, so we deployed a
+  custom `GenericWithdrawalOutputBuilder` (from `lynoferraz/aux-cr-contracts`) as a byte-exact match.
+- **✅ Now obsolete:** the single-asset record **is** the stock builder's 32-byte format, so we use
+  the stock `UsdWithdrawalOutputBuilder` directly. `devnet/run_devnet.sh up` deploys it
+  deterministically for the devnet token at `0x0745787835A019cd4dae8EDB541Fbc0647793d63`; the custom
+  `GenericWithdrawalOutputBuilder.sol` has been **deleted** from the repo.
 
 ### 7. The wallet app itself (`src/main.rs`, `Dockerfile`, `cartesi.toml`)
 - **What we changed:**
-  - **`cartesi.toml`** (new) — declares the two drives (app + raw accounts drive).
-  - **`src/main.rs`** — opens the ledger from the drive (`init_from_file("/dev/pmem1", …)`) on
-    the machine, and calls **`libc::sync()` before every yield** (the keystone fix — see Part 3).
+  - **`cartesi.toml`** — declares the two drives (app + raw accounts drive), with the single-asset
+    accounts-drive geometry (`log2_leaves_per_account = 0`, `log2_max_num_of_accounts = 12`).
+  - **`src/main.rs`** — opens the ledger from the drive as a single-asset ERC-20 ledger
+    (`init_single_from_file("/dev/pmem1", …, LedgerAsset::Erc20(token))`), and calls **`libc::sync()`
+    before every yield** (the keystone fix — see Part 3).
   - **`Dockerfile`** — installs `libstdc++6` in the machine's filesystem (libcma is C++), and
-    bakes in the **devnet portal addresses** (the wallet recognises a deposit by *who sent it*,
-    so its configured portal must match the chain it runs on).
-- **Best going forward:** Make the portal addresses configurable at deploy/runtime instead of
-  baked at build time, so the same image works on any network.
+    bakes in the **devnet portal address** (the wallet recognises a deposit by *who sent it*, so its
+    configured ERC-20 portal must match the chain it runs on).
+- **Best going forward:** Make the portal/token addresses configurable at deploy/runtime instead of
+  baked at build time, so the same image works on any network. (The token is already read from
+  `WALLET_TOKEN_ADDRESS`.)
 
-### 8. The proof "transform"
-- **What it is:** libcma's proof tool and the node's `cartesi-rollups-cli` speak **different proof
-  dialects**. We wrote a small Python transform that splits libcma's single full proof into the
-  two files the CLI wants, converts the hashes from base64 to hex, and computes the
-  accounts-drive root.
-- **Best going forward:** Ship this transform as a small script/subcommand (ideally inside
-  `account-driver-reader` itself, emitting the CLI's format directly), so no one re-derives it.
+### 8. The proof "transform" — ✅ NO LONGER NEEDED
+- **What it was (historical):** the ported libcma proof tool and the node's `cartesi-rollups-cli`
+  spoke **different proof dialects**, so we wrote `transform_proof.py` to split libcma's single full
+  proof into the two files the CLI wants (base64→hex, fold the accounts-drive root).
+- **✅ Now obsolete:** `cartesi-rollups-machine-tool prove accounts-drive` emits the CLI's two proof
+  files (`--out-drive-root-proof` / `--out-withdraw-proof`) directly. `transform_proof.py` has been
+  **deleted** from the repo.
 
 ---
 
@@ -220,43 +233,50 @@ whole proof chain worked.
 
 ### How a user runs/tests it (step by step)
 
-> Prerequisites: Docker, Foundry (`anvil`/`cast`/`forge`), the patched Cartesi CLI, and
+> Prerequisites: Docker, Foundry (`anvil`/`cast`/`forge`), `@cartesi/cli` ≥ 2.0.0-alpha.35, and
 > `cartesi-rollups-cli`. See the [README prerequisites](README.md#prerequisites).
 
 ```sh
 # 0) Build the machine (once)
-cartesi-patched build
+cartesi build
 
-# 1) Start a local blockchain + the node (in devnet/)
+# 1) Start a local blockchain + the node (in devnet/). run_devnet.sh up also deploys the stock
+#    UsdWithdrawalOutputBuilder for the devnet token — no custom builder to compile.
 cd devnet
 ./run_devnet.sh up
 docker compose -f compose.local.yaml up -d
 
-# 2) Deploy the GenericWithdrawalOutputBuilder, put its address in withdrawal.json,
-#    then deploy the wallet WITH the withdrawal config
-#    (see devnet/withdrawal.json and the README for the exact commands)
+# 2) Deploy the wallet WITH the withdrawal config (devnet/withdrawal.json already points at the
+#    stock builder + single-asset geometry); see the README for the exact deploy command.
 
 # 3) Mint test tokens and deposit
 cast send --rpc-url http://localhost:8545 --private-key <anvil-key> <token> "mint(uint256)" 1000000
-cartesi-rollups-cli deposit erc20 cma-wallet-wd --portal <erc20-portal> --token <token> --amount 1000 --approve --yes
+cartesi-rollups-cli deposit erc20 cma-rust-wallet --portal <erc20-portal> --token <token> --amount 1000 --approve --yes
 
 # 4) Foreclose (as the guardian)
-cartesi-rollups-cli foreclose cma-wallet-wd --yes
+cartesi-rollups-cli foreclose cma-rust-wallet --yes
 
-# 5) Generate the proof from the latest snapshot
-account-driver-reader --mem-length 4194304 --n-accounts 4096 --n-assets 256 --n-balances 4096 \
-  --dump-full-proof <snapshot-dir> 0x90000000000000 <accounts-drive.bin> <owner> <token> > full-proof.json
+# 5) Generate the two proof files with the default machine-tool (replay the DB, then prove)
+EPOCH=$(cartesi-rollups-cli read epochs cma-rust-wallet --status CLAIM_ACCEPTED --limit 1 --descending | jq -r '.data[0].index')
+docker compose -f compose.local.yaml run --rm machine-tool replay \
+  --template /var/lib/cartesi-rollups-node/snapshot --application cma-rust-wallet \
+  --to-epoch "$EPOCH" --store /artifacts/replay-snapshot
+docker compose -f compose.local.yaml run --rm machine-tool prove accounts-drive \
+  --snapshot /artifacts/replay-snapshot \
+  --accounts-drive-start-index 309237645312 --log2-max-num-of-accounts 12 --log2-leaves-per-account 0 \
+  --account <owner> \
+  --out-drive-root-proof /artifacts/drive-root-proof.json --out-withdraw-proof /artifacts/withdraw-proof.json
 
-# 6) Transform it into the two proof files, then submit
-cartesi-rollups-cli prove-drive-root cma-wallet-wd --proof-file drive-root-proof.json --yes
-cartesi-rollups-cli withdraw         cma-wallet-wd --proof-file withdraw-proof.json   # confirm the prompt
+# 6) Submit the two proof files
+cartesi-rollups-cli prove-drive-root cma-rust-wallet --proof-file artifacts/drive-root-proof.json --yes
+cartesi-rollups-cli withdraw         cma-rust-wallet --proof-file artifacts/withdraw-proof.json   --yes
 
 # 7) Check your tokens came back
 cast call <token> "balanceOf(address)(uint256)" <your-address> --rpc-url http://localhost:8545
 ```
 
 When it works, the application contract's token balance drops to **0** and your wallet's balance
-goes **up by the amount you deposited** — recovered with no live node.
+goes **up by the amount you deposited** — recovered with no live node, using only default tooling.
 
 ---
 
@@ -264,23 +284,27 @@ goes **up by the amount you deposited** — recovered with no live node.
 
 Right now this works, but it took many manual steps. To make it a one-command experience:
 
-1. **Fix libcma upstream so `riscv64` self-builds (or publish `libcma-sys`).** Removes the entire
-   "vendor a prebuilt archive" dance. *(Biggest win.)*
-2. **Release a Cartesi CLI ≥ the `data_filename` fix.** Removes the bundle patch; users just
-   `npm i -g @cartesi/cli@latest`.
-3. **Upstream the `account-driver-reader` 0.20 port** and have it **emit the CLI's proof format
-   directly** (or fold the transform into a small script). Removes the Python step and the
-   base64/split/keccak guesswork.
-4. **Get `GenericWithdrawalOutputBuilder` into the default devnet/contracts.** Removes the manual
-   `forge create` after every chain reset.
-5. **Make the wallet's portal addresses configurable at runtime**, so one built image works on any
-   network (no rebuild to change chains).
+1. ~~**Fix libcma upstream so `riscv64` self-builds (or publish `libcma-sys`).**~~ ✅ **Done** —
+   libcma's `build.rs` now cross-compiles `libcma.a` from source on the `riscv64` feature, so the
+   wallet uses a plain git dependency (`branch = "feat/single-asset"`) with no vendored archive.
+2. ~~**Release a Cartesi CLI ≥ the `data_filename` fix.**~~ ✅ **Done** — shipped in
+   `@cartesi/cli` 2.0.0-alpha.35; the bundle patch is gone, users just `npm i -g @cartesi/cli@latest`.
+3. ~~**Upstream the `account-driver-reader` 0.20 port** and have it emit the CLI's proof format
+   directly (or fold in the transform).~~ ✅ **Obsoleted by single-asset** — the default
+   `cartesi-rollups-machine-tool` (`replay` + `prove accounts-drive`) reads the standard 32-byte
+   record and writes the CLI's two proof files directly. No custom reader, no Python transform.
+4. ~~**Get `GenericWithdrawalOutputBuilder` into the default devnet/contracts.**~~ ✅ **Obsoleted by
+   single-asset** — the stock `UsdWithdrawalOutputBuilder` already ships in the protocol and matches
+   the 32-byte record; `run_devnet.sh up` deploys it for the devnet token.
+5. **Make the wallet's portal/token addresses configurable at runtime**, so one built image works on
+   any network (no rebuild to change chains). The token already comes from `WALLET_TOKEN_ADDRESS`.
 6. **Add a single `Makefile`/script** in `devnet/` that runs the whole happy path
-   (`up → deploy builder → deploy app → deposit → foreclose → prove → withdraw → verify`) so a
-   newcomer can type one command and watch tokens get recovered.
+   (`up → deploy app → deposit → foreclose → prove → withdraw → verify`) so a newcomer can type one
+   command and watch tokens get recovered.
 7. **Pin every version** (CLI, SDK, node, contracts, libcma, Boost, GCC) in one place, since this
-   whole flow is sensitive to version drift between the machine (0.20), the CLI (alpha.34), the
+   whole flow is sensitive to version drift between the machine (0.20), the CLI (alpha.35), the
    node (alpha.12), and the contracts (v3-alpha).
 
-The single most valuable cleanup is **#1** (libcma self-building) plus **#6** (a one-command
-script) — together they turn a multi-hour expedition into "clone, run one script, see it work."
+With items #1–#4 now resolved (libcma self-builds; the CLI ships the fix; emergency withdrawal uses
+the default machine-tool + stock builder), the remaining win is **#6** — a one-command happy-path
+script that turns this into "clone, run one script, see it work."

@@ -15,8 +15,11 @@ libcmt-binding-rust = { git = "https://github.com/Mugen-Builders/libcmt-binding-
 # libcma is pulled straight from GitHub. Its build.rs cross-compiles the real riscv64
 # libcma.a from source (no vendored archive needed) and auto-inits its own submodules.
 # On the Cartesi machine (riscv64) use the real libcma; on the host use the in-memory mock.
+# Pinned to feat/single-asset: this wallet uses the single-asset ledger API
+# (init_single_from_file / LedgerAsset), whose 32-byte account record is provable with the
+# default cartesi-rollups-machine-tool (no custom withdrawal-output builder).
 [target.'cfg(target_arch = "riscv64")'.dependencies]
-libcma_binding_rust = { git = "https://github.com/Mugen-Builders/libcma_binding_rust.git", branch = "main", default-features = false, features = ["riscv64"] }
+libcma_binding_rust = { git = "https://github.com/Mugen-Builders/libcma_binding_rust.git", branch = "feat/single-asset", default-features = false, features = ["riscv64"] }
 
 [target.'cfg(not(target_arch = "riscv64"))'.dependencies]
-libcma_binding_rust = { git = "https://github.com/Mugen-Builders/libcma_binding_rust.git", branch = "main", default-features = false, features = ["native"] }
+libcma_binding_rust = { git = "https://github.com/Mugen-Builders/libcma_binding_rust.git", branch = "feat/single-asset", default-features = false, features = ["native"] }
